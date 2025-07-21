@@ -1,9 +1,0 @@
-[submodule "submodules/simple-knn"]
-	path = submodules/simple-knn
-	url = https://gitlab.inria.fr/bkerbl/simple-knn.git
-[submodule "submodules/diff-gaussian-rasterization"]
-	path = submodules/diff-gaussian-rasterization
-	url = git@github.com:nyu-systems/diff-gaussian-rasterization.git
-[submodule "submodules/gsplat"]
-	path = submodules/gsplat
-	url = git@github.com:alexis-mmm/gsplat.git
