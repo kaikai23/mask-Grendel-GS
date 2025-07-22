@@ -2591,6 +2591,8 @@ def batched_loss_computation(
     batched_compute_locally,
     batched_strategies,
     batched_statistic_collector,
+    batched_mask,
+    lambda_mask,
 ):
     args = utils.get_args()
     timers = utils.get_timers()
@@ -2605,6 +2607,7 @@ def batched_loss_computation(
         compute_locally,
         strategy,
         statistic_collector,
+        mask,
     ) in enumerate(
         zip(
             batched_image,
@@ -2612,6 +2615,7 @@ def batched_loss_computation(
             batched_compute_locally,
             batched_strategies,
             batched_statistic_collector,
+            batched_mask,
         )
     ):
         if image is None:  # This image is not rendered locally.
@@ -2624,8 +2628,9 @@ def batched_loss_computation(
             Ll1, ssim_loss = final_system_loss_computation(
                 image, camera, compute_locally, strategy, statistic_collector
             )
+            mask_loss = (torch.mean(mask))**2
             loss = (1.0 - args.lambda_dssim) * Ll1 + args.lambda_dssim * (
-                1.0 - ssim_loss
+                1.0 - ssim_loss + lambda_mask * mask_loss
             )
             # print(f"ssim_loss: {1-ssim_loss}")
 

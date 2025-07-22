@@ -494,6 +494,7 @@ def render(screenspace_pkg, strategy=None):
             conic_opacity=screenspace_pkg["conic_opacity_for_render"],
             rgb=screenspace_pkg["rgb_for_render"],
             depths=screenspace_pkg["depths_for_render"],
+            mask=screenspace_pkg["mask_for_render"],
             radii=screenspace_pkg["radii_for_render"],
             compute_locally=compute_locally,
             extended_compute_locally=extended_compute_locally,
@@ -553,7 +554,7 @@ def all_to_all_communication_final(
     local_to_gpuj_camk_send_ids = [[] for j in range(utils.DEFAULT_GROUP.size())]
     for k in range(num_cameras):
         strategy = batched_strategies[k]
-        means2D, rgb, conic_opacity, radii, depths = batched_screenspace_params[k]
+        means2D, rgb, conic_opacity, radii, depths, mask = batched_screenspace_params[k]
         local2j_ids, local2j_ids_bool = batched_strategies[k].get_local2j_ids(
             means2D, radii, batched_rasterizers[k].raster_settings, batched_cuda_args[k]
         )
@@ -643,13 +644,14 @@ def all_to_all_communication_final(
     batched_catted_screenspace_states = []
     batched_catted_screenspace_auxiliary_states = []
     for k in range(num_cameras):
-        means2D, rgb, conic_opacity, radii, depths = batched_screenspace_params[k]
+        means2D, rgb, conic_opacity, radii, depths, mask = batched_screenspace_params[k]
         if k == 0:
             mean2d_dim1 = means2D.shape[1]
             rgb_dim1 = rgb.shape[1]
             conic_opacity_dim1 = conic_opacity.shape[1]
+            mask_dim1 = mask.shape[1]
         batched_catted_screenspace_states.append(
-            torch.cat([means2D, rgb, conic_opacity], dim=1).contiguous()
+            torch.cat([means2D, rgb, conic_opacity, mask], dim=1).contiguous()
         )
         batched_catted_screenspace_auxiliary_states.append(
             torch.cat(
@@ -663,17 +665,19 @@ def all_to_all_communication_final(
     batched_means2D_redistributed = []
     batched_rgb_redistributed = []
     batched_conic_opacity_redistributed = []
+    batched_mask_redistributed = []
     for k in range(num_cameras):
-        means2D_redistributed, rgb_redistributed, conic_opacity_redistributed = (
+        means2D_redistributed, rgb_redistributed, conic_opacity_redistributed, mask_redistributed = (
             torch.split(
                 batched_params_redistributed[k],
-                [mean2d_dim1, rgb_dim1, conic_opacity_dim1],
+                [mean2d_dim1, rgb_dim1, conic_opacity_dim1, mask_dim1],
                 dim=1,
             )
         )
         batched_means2D_redistributed.append(means2D_redistributed)
         batched_rgb_redistributed.append(rgb_redistributed)
         batched_conic_opacity_redistributed.append(conic_opacity_redistributed)
+        batched_mask_redistributed.append(mask_redistributed)
 
     batched_radii_depth_redistributed = one_all_to_all(
         batched_catted_screenspace_auxiliary_states, use_function_version=False
@@ -694,6 +698,7 @@ def all_to_all_communication_final(
         batched_conic_opacity_redistributed,
         batched_radii_redistributed,
         batched_depths_redistributed,
+        batched_mask_redistributed,
         gpui_to_gpuj_imgk_size,
     )
 
@@ -904,6 +909,7 @@ def distributed_preprocess3dgs_and_all2all_final(
     scales = pc.get_scaling
     rotations = pc.get_rotation
     shs = pc.get_features
+    mask = pc.get_mask
     if timers is not None:
         timers.stop("forward_prepare_gaussians")
     utils.check_initial_gpu_memory_usage("after forward_prepare_gaussians")
@@ -957,7 +963,7 @@ def distributed_preprocess3dgs_and_all2all_final(
         if mode == "train":
             means2D.retain_grad()
         batched_means2D.append(means2D)
-        screenspace_params = [means2D, rgb, conic_opacity, radii, depths]
+        screenspace_params = [means2D, rgb, conic_opacity, radii, depths, mask]
         batched_rasterizers.append(rasterizer)
         batched_screenspace_params.append(screenspace_params)
         batched_radii.append(radii)
@@ -994,6 +1000,10 @@ def distributed_preprocess3dgs_and_all2all_final(
                 screenspace_params[4]
                 for screenspace_params in batched_screenspace_params
             ],
+            "batched_mask_redistributed":[
+                screenspace_params[5]
+                for screenspace_params in batched_screenspace_params
+            ],
             "gpui_to_gpuj_imgk_size": [
                 [[batched_means2D[i].shape[0] for i in range(len(batched_means2D))]]
             ],
@@ -1008,6 +1018,7 @@ def distributed_preprocess3dgs_and_all2all_final(
         batched_conic_opacity_redistributed,
         batched_radii_redistributed,
         batched_depths_redistributed,
+        batched_mask_redistributed,
         gpui_to_gpuj_imgk_size,
     ) = all_to_all_communication_final(
         batched_rasterizers,
@@ -1032,6 +1043,7 @@ def distributed_preprocess3dgs_and_all2all_final(
         "batched_conic_opacity_redistributed": batched_conic_opacity_redistributed,
         "batched_radii_redistributed": batched_radii_redistributed,
         "batched_depths_redistributed": batched_depths_redistributed,
+        "batched_mask_redistributed": batched_mask_redistributed,
         "gpui_to_gpuj_imgk_size": gpui_to_gpuj_imgk_size,
     }
     return batched_screenspace_pkg
@@ -1247,6 +1259,7 @@ def render_final(batched_screenspace_pkg, batched_strategies, tile_size=16):
         conic_opacity_redistributed = batched_screenspace_pkg[
             "batched_conic_opacity_redistributed"
         ][cam_id]
+        mask_redistributed = batched_screenspace_pkg["batched_mask_redistributed"][cam_id]
         radii_redistributed = batched_screenspace_pkg["batched_radii_redistributed"][
             cam_id
         ]
@@ -1274,6 +1287,7 @@ def render_final(batched_screenspace_pkg, batched_strategies, tile_size=16):
                     conic_opacity=conic_opacity_redistributed,
                     rgb=rgb_redistributed,
                     depths=depths_redistributed,
+                    mask=mask_redistributed,
                     radii=radii_redistributed,
                     compute_locally=compute_locally,
                     extended_compute_locally=extended_compute_locally,

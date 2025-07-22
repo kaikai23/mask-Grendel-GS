@@ -182,6 +182,8 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
                 cuda_args["stats_collector"]
                 for cuda_args in batched_screenspace_pkg["batched_cuda_args"]
             ]
+            batched_mask = batched_screenspace_pkg['batched_mask_redistributed']
+            lambda_mask = args.lambda_mask if args.mask_from_iter <= iteration <= args.mask_until_iter else 0
 
         loss_sum, batched_losses = batched_loss_computation(
             batched_image,
@@ -189,6 +191,8 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
             batched_compute_locally,
             batched_strategies,
             batch_statistic_collector,
+            batched_mask,
+            lambda_mask,
         )
 
         timers.start("backward")
@@ -480,13 +484,13 @@ def training_report(
                 psnr_test /= num_cameras
                 l1_test /= num_cameras
                 utils.print_rank_0(
-                    "\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(
-                        iteration, config["name"], l1_test, psnr_test
+                    "\n[ITER {}] Evaluating {}: L1 {} PSNR {} used_gs {}".format(
+                        iteration, config["name"], l1_test, psnr_test, scene.gaussians.get_mask.sum().item()
                     )
                 )
                 log_file.write(
-                    "[ITER {}] Evaluating {}: L1 {} PSNR {}\n".format(
-                        iteration, config["name"], l1_test, psnr_test
+                    "[ITER {}] Evaluating {}: L1 {} PSNR {} used_gs {}\n".format(
+                        iteration, config["name"], l1_test, psnr_test, scene.gaussians.get_mask.sum().item()
                     )
                 )
 

@@ -46,6 +46,8 @@ class GaussianModel:
         self.opacity_activation = torch.sigmoid
         self.inverse_opacity_activation = inverse_sigmoid
 
+        self.mask_activation = nn.LogSoftmax(dim=-1)
+
         self.rotation_activation = torch.nn.functional.normalize
 
     def __init__(self, sh_degree: int):
@@ -57,6 +59,7 @@ class GaussianModel:
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+        self._mask_score = torch.empty(0)
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(
             0
@@ -76,6 +79,7 @@ class GaussianModel:
             self._scaling,
             self._rotation,
             self._opacity,
+            self._mask_score,
             self.max_radii2D,
             self.xyz_gradient_accum,  # TODO: deal with self.send_to_gpui_cnt
             self.denom,
@@ -92,6 +96,7 @@ class GaussianModel:
             self._scaling,
             self._rotation,
             self._opacity,
+            self._mask_score,
             self.max_radii2D,
             xyz_gradient_accum,
             denom,
@@ -127,6 +132,10 @@ class GaussianModel:
     @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
+    
+    @property
+    def get_mask(self):
+        return nn.functional.gumbel_softmax(self.mask_activation(self._mask_score), hard=True)[:, 0:1]
 
     def get_covariance(self, scaling_modifier=1):
         return self.covariance_activation(
@@ -174,6 +183,7 @@ class GaussianModel:
                 (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
             )
         )
+        mask_score = torch.ones((fused_point_cloud.shape[0], 2), dtype=torch.float, device="cuda") @ torch.tensor([[10.,0.], [0., 1.]], dtype=torch.float, device="cuda")
 
         # The above computation/memory is replicated on all ranks. Because initialization is small, it's ok.
         # Split the point cloud across the ranks.
@@ -192,6 +202,7 @@ class GaussianModel:
             scales = scales[point_ind_l:point_ind_r].contiguous()
             rots = rots[point_ind_l:point_ind_r].contiguous()
             opacities = opacities[point_ind_l:point_ind_r].contiguous()
+            mask_score = mask_score[point_ind_l:point_ind_r].contiguous()
             log_file.write(
                 "rank: {}, Number of initialized points: {}\n".format(
                     utils.GLOBAL_RANK, fused_point_cloud.shape[0]
@@ -209,6 +220,7 @@ class GaussianModel:
             scales = scales[drop_mask]
             rots = rots[drop_mask]
             opacities = opacities[drop_mask]
+            mask_score = mask_score[drop_mask]
             log_file.write(
                 "rank: {}, Number of initialized points after random drop: {}\n".format(
                     utils.GLOBAL_RANK, fused_point_cloud.shape[0]
@@ -226,6 +238,7 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
+        self._mask_score = nn.Parameter(mask_score.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self.sum_visible_count_in_one_batch = torch.zeros(
             (self.get_xyz.shape[0]), device="cuda"
@@ -277,6 +290,7 @@ class GaussianModel:
                 "lr": training_args.opacity_lr,
                 "name": "opacity",
             },
+            {'params': [self._mask_score], 'lr':training_args.mask_lr, "name": "mask"},
             {
                 "params": [self._scaling],
                 "lr": training_args.scaling_lr * args.lr_scale_pos_and_scale,
@@ -422,6 +436,8 @@ class GaussianModel:
         _xyz = _features_dc = _features_rest = _opacity = _scaling = _rotation = None
         utils.log_cpu_memory_usage("start save_ply")
         group = utils.DEFAULT_GROUP
+        mask = self.get_mask
+        mask = mask.to(torch.bool).squeeze(1)
         if args.gaussians_distribution and not args.distributed_save:
             # gather all gaussians at rank 0
             def gather_uneven_tensors(tensor):
@@ -460,12 +476,12 @@ class GaussianModel:
                     gathered_tensors if group.rank() == 0 else None
                 )  # only return gather tensors at rank 0
 
-            _xyz = gather_uneven_tensors(self._xyz)
-            _features_dc = gather_uneven_tensors(self._features_dc)
-            _features_rest = gather_uneven_tensors(self._features_rest)
-            _opacity = gather_uneven_tensors(self._opacity)
-            _scaling = gather_uneven_tensors(self._scaling)
-            _rotation = gather_uneven_tensors(self._rotation)
+            _xyz = gather_uneven_tensors(self._xyz[mask])
+            _features_dc = gather_uneven_tensors(self._features_dc[mask])
+            _features_rest = gather_uneven_tensors(self._features_rest[mask])
+            _opacity = gather_uneven_tensors(self._opacity[mask])
+            _scaling = gather_uneven_tensors(self._scaling[mask])
+            _rotation = gather_uneven_tensors(self._rotation[mask])
 
             if group.rank() != 0:
                 return
@@ -474,12 +490,12 @@ class GaussianModel:
             assert (
                 utils.DEFAULT_GROUP.size() > 1
             ), "distributed_save should be used with more than 1 rank."
-            _xyz = self._xyz
-            _features_dc = self._features_dc
-            _features_rest = self._features_rest
-            _opacity = self._opacity
-            _scaling = self._scaling
-            _rotation = self._rotation
+            _xyz = self._xyz[mask]
+            _features_dc = self._features_dc[mask]
+            _features_rest = self._features_rest[mask]
+            _opacity = self._opacity[mask]
+            _scaling = self._scaling[mask]
+            _rotation = self._rotation[mask]
             if path.endswith(".ply"):
                 path = (
                     path[:-4]
@@ -492,12 +508,12 @@ class GaussianModel:
         elif not args.gaussians_distribution:
             if group.rank() != 0:
                 return
-            _xyz = self._xyz
-            _features_dc = self._features_dc
-            _features_rest = self._features_rest
-            _opacity = self._opacity
-            _scaling = self._scaling
-            _rotation = self._rotation
+            _xyz = self._xyz[mask]
+            _features_dc = self._features_dc[mask]
+            _features_rest = self._features_rest[mask]
+            _opacity = self._opacity[mask]
+            _scaling = self._scaling[mask]
+            _rotation = self._rotation[mask]
             if path.endswith(".ply"):
                 path = (
                     path[:-4]
@@ -821,6 +837,7 @@ class GaussianModel:
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
+        self._mask_score = optimizable_tensors["mask"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
 
@@ -887,6 +904,7 @@ class GaussianModel:
         new_features_dc,
         new_features_rest,
         new_opacities,
+        new_masks,
         new_scaling,
         new_rotation,
         new_send_to_gpui_cnt,
@@ -896,6 +914,7 @@ class GaussianModel:
             "f_dc": new_features_dc,
             "f_rest": new_features_rest,
             "opacity": new_opacities,
+            "mask": new_masks,
             "scaling": new_scaling,
             "rotation": new_rotation,
         }
@@ -905,6 +924,7 @@ class GaussianModel:
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
+        self._mask_score = optimizable_tensors["mask"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
 
@@ -950,6 +970,7 @@ class GaussianModel:
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N, 1, 1)
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N, 1, 1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N, 1)
+        new_mask = self._mask_score[selected_pts_mask].repeat(N,1)
         new_send_to_gpui_cnt = self.send_to_gpui_cnt[selected_pts_mask].repeat(N, 1)
 
         self.densification_postfix(
@@ -957,6 +978,7 @@ class GaussianModel:
             new_features_dc,
             new_features_rest,
             new_opacity,
+            new_mask,
             new_scaling,
             new_rotation,
             new_send_to_gpui_cnt,
@@ -988,6 +1010,7 @@ class GaussianModel:
         new_features_dc = self._features_dc[selected_pts_mask]
         new_features_rest = self._features_rest[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
+        new_masks = self._mask_score[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
         new_send_to_gpui_cnt = self.send_to_gpui_cnt[selected_pts_mask]
@@ -997,6 +1020,7 @@ class GaussianModel:
             new_features_dc,
             new_features_rest,
             new_opacities,
+            new_masks,
             new_scaling,
             new_rotation,
             new_send_to_gpui_cnt,
@@ -1026,6 +1050,10 @@ class GaussianModel:
         self.densify_and_split(grads, max_grad, extent)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
+        sample_times = 10
+        batched_mask_score = self._mask_score.unsqueeze(0).repeat(sample_times, 1, 1)
+        res = nn.functional.gumbel_softmax(self.mask_activation(batched_mask_score), hard=True)[:, :, 0].sum(0)
+        prune_mask = torch.logical_or(prune_mask, res==0.)
         if max_screen_size:
             big_points_vs = self.max_radii2D > max_screen_size
             # NOTE: this is bug in its implementation.
@@ -1041,6 +1069,15 @@ class GaussianModel:
             )
         self.prune_points(prune_mask)
 
+        torch.cuda.empty_cache()
+    
+    def mask_prune(self):
+        sample_times = 10
+        batched_mask_score = self._mask_score.unsqueeze(0).repeat(sample_times, 1, 1)
+        res = nn.functional.gumbel_softmax(self.mask_activation(batched_mask_score), hard=True)[:, :, 0].sum(0)
+        prune_mask = (res==0.).squeeze()
+        # prune_mask = (torch.sigmoid(self._mask_score[:, 1:2]) <= 0.01).squeeze()
+        self.prune_points(prune_mask)
         torch.cuda.empty_cache()
 
     def add_densification_stats(
@@ -1309,6 +1346,7 @@ class GaussianModel:
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
+        self._mask_score = optimizable_tensors["mask"]
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
@@ -1375,6 +1413,7 @@ def sync_gradients_sparsely(gaussians, group):
         sync_grads(gaussians._opacity)
         sync_grads(gaussians._scaling)
         sync_grads(gaussians._rotation)
+        sync_grads(gaussians._mask_score)
         # We must optimize this, because there should be large kernel launch overhead.
 
     log_file = utils.get_log_file()
@@ -1405,6 +1444,7 @@ def sync_gradients_densely(gaussians, group):
         sync_grads(gaussians._opacity)
         sync_grads(gaussians._scaling)
         sync_grads(gaussians._rotation)
+        sync_grads(gaussians._mask_score)
 
 
 def sync_gradients_fused_densely(gaussians, group):
@@ -1421,6 +1461,7 @@ def sync_gradients_fused_densely(gaussians, group):
                 gaussians._opacity,
                 gaussians._scaling,
                 gaussians._rotation,
+                gaussians._mask_score
             ]
         ]
         all_params_grads_dim1 = [param_grad.shape[1] for param_grad in all_params_grads]

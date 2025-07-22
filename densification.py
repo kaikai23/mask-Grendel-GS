@@ -83,6 +83,25 @@ def densification(iteration, scene, gaussians, batched_screenspace_pkg):
             utils.check_memory_usage(
                 log_file, args, iteration, gaussians, before_densification_stop=False
             )
+        if iteration > args.mask_from_iter and iteration < args.mask_until_iter and utils.check_update_at_this_iter(
+            iteration, args.bsz, args.mask_prune_iter, 0
+        ):
+            gaussians.mask_prune()
+            if utils.get_denfify_iter() % args.redistribute_gaussians_frequency == 0:
+                num_3dgs_before_redistribute = gaussians.get_xyz.shape[0]
+                timers.start("redistribute_gaussians")
+                gaussians.redistribute_gaussians()
+                timers.stop("redistribute_gaussians")
+                num_3dgs_after_redistribute = gaussians.get_xyz.shape[0]
+
+                log_file.write(
+                    "iteration[{},{}) redistribute. Now num of 3dgs before redistribute: {}. Now num of 3dgs after redistribute: {}. \n".format(
+                        iteration,
+                        iteration + args.bsz,
+                        num_3dgs_before_redistribute,
+                        num_3dgs_after_redistribute,
+                    )
+                )
 
 
 def gsplat_densification(iteration, scene, gaussians, batched_screenspace_pkg):
