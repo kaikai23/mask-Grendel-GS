@@ -139,6 +139,7 @@ RenderGaussiansCUDA(
     const int image_width,// image setting
 	torch::Tensor& means2D,
 	torch::Tensor& depths,
+	torch::Tensor& mask,
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
 	torch::Tensor& rgb,//3dgs intermediate results
@@ -146,7 +147,7 @@ RenderGaussiansCUDA(
 	const bool debug,
 	const pybind11::dict &args);
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RenderGaussiansBackwardCUDA(
  	const torch::Tensor& background,
 	const int R,
@@ -158,6 +159,7 @@ RenderGaussiansBackwardCUDA(
 	const torch::Tensor& means2D,
 	const torch::Tensor& conic_opacity,
 	const torch::Tensor& rgb,
+	const torch::Tensor& mask,
 	const bool debug,
 	const pybind11::dict &args);
 

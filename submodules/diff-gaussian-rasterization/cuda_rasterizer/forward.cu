@@ -269,6 +269,7 @@ renderCUDA(
 	const float2* __restrict__ points_xy_image,
 	const float* __restrict__ features,
 	const float4* __restrict__ conic_opacity,
+	const float* __restrict__ mask,
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	uint32_t* __restrict__ n_contrib2loss,
@@ -330,6 +331,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float collected_mask[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -354,6 +356,7 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			collected_mask[block.thread_rank()] = mask[coll_id];
 		}
 		block.sync();
 
@@ -368,6 +371,7 @@ renderCUDA(
 			float2 xy = collected_xy[j];
 			float2 d = { xy.x - pixf.x, xy.y - pixf.y };
 			float4 con_o = collected_conic_opacity[j];
+			float mask = collected_mask[j];
 			float power = -0.5f * (con_o.x * d.x * d.x + con_o.z * d.y * d.y) - con_o.y * d.x * d.y;
 			if (power > 0.0f)
 				continue;
@@ -379,7 +383,7 @@ renderCUDA(
 			float alpha = min(0.99f, con_o.w * exp(power));
 			if (alpha < 1.0f / 255.0f)
 				continue;
-			float test_T = T * (1 - alpha);
+			float test_T = T * (1 - mask * alpha);
 			if (test_T < 0.0001f)
 			{
 				done = true;
@@ -390,7 +394,7 @@ renderCUDA(
 
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+				C[ch] += features[collected_id[j] * CHANNELS + ch] * mask * alpha * T;
 
 			T = test_T;
 
@@ -420,6 +424,7 @@ void FORWARD::render(
 	const float2* means2D,
 	const float* colors,
 	const float4* conic_opacity,
+	const float* mask,
 	float* final_T,
 	uint32_t* n_contrib,
 	uint32_t* n_contrib2loss,
@@ -434,6 +439,7 @@ void FORWARD::render(
 		means2D,
 		colors,
 		conic_opacity,
+		mask,
 		final_T,
 		n_contrib,
 		n_contrib2loss,

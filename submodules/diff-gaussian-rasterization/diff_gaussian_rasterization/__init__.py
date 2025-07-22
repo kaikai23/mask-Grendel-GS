@@ -157,6 +157,7 @@ def render_gaussians(
     conic_opacity,
     rgb,
     depths,
+    mask,
     radii,
     compute_locally,
     extended_compute_locally,
@@ -168,6 +169,7 @@ def render_gaussians(
         conic_opacity,
         rgb,
         depths,
+        mask,
         radii,
         compute_locally,
         extended_compute_locally,
@@ -183,6 +185,7 @@ class _RenderGaussians(torch.autograd.Function):
         conic_opacity,
         rgb,
         depths,
+        mask,
         radii,
         compute_locally,
         extended_compute_locally,
@@ -205,6 +208,7 @@ class _RenderGaussians(torch.autograd.Function):
             raster_settings.image_width,# image setting
             means2D,
             depths,
+            mask,
             radii,
             conic_opacity,
             rgb,# 3dgs intermediate results
@@ -226,7 +230,7 @@ class _RenderGaussians(torch.autograd.Function):
         ctx.cuda_args = cuda_args
         ctx.num_rendered = num_rendered
         # ctx.render_forward_start_time = render_forward_start_time
-        ctx.save_for_backward(means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally)
+        ctx.save_for_backward(means2D, conic_opacity, rgb, mask, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally)
         ctx.mark_non_differentiable(n_render, n_consider, n_contrib)
 
         return color, n_render, n_consider, n_contrib
@@ -240,7 +244,7 @@ class _RenderGaussians(torch.autograd.Function):
         raster_settings = ctx.raster_settings
         cuda_args = ctx.cuda_args
         # render_forward_start_time = ctx.render_forward_start_time
-        means2D, conic_opacity, rgb, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally = ctx.saved_tensors
+        means2D, conic_opacity, rgb, mask, geomBuffer, binningBuffer, imgBuffer, compute_locally, extended_compute_locally = ctx.saved_tensors
 
         # Restructure args as C++ method expects them
         args = (raster_settings.bg,
@@ -253,10 +257,11 @@ class _RenderGaussians(torch.autograd.Function):
                 means2D,
                 conic_opacity,
                 rgb,# 3dgs intermediate results
+                mask,
                 raster_settings.debug,
                 cuda_args)
 
-        dL_dmeans2D, dL_dconic_opacity, dL_dcolors = _C.render_gaussians_backward(*args)
+        dL_dmeans2D, dL_dconic_opacity, dL_dcolors, dL_dmask = _C.render_gaussians_backward(*args)
 
         # Used when cuda_args["avoid_pixel_all2all"] is True.
         # torch.cuda.synchronize()
@@ -272,6 +277,7 @@ class _RenderGaussians(torch.autograd.Function):
             dL_dconic_opacity.contiguous(),
             dL_dcolors.contiguous(),
             None,
+            dL_dmask.contiguous(),
             None,
             None,
             None,
@@ -334,7 +340,7 @@ class GaussianRasterizer(nn.Module):
             raster_settings,
             cuda_args)
 
-    def render_gaussians(self, means2D, conic_opacity, rgb, depths, radii, compute_locally, extended_compute_locally, cuda_args = None):
+    def render_gaussians(self, means2D, conic_opacity, rgb, depths, mask, radii, compute_locally, extended_compute_locally, cuda_args = None):
 
         raster_settings = self.raster_settings
 
@@ -344,6 +350,7 @@ class GaussianRasterizer(nn.Module):
             conic_opacity,
             rgb,
             depths,
+            mask,
             radii,
             compute_locally,
             extended_compute_locally,

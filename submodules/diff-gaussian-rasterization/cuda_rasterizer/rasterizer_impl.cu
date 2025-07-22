@@ -522,6 +522,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 	const int width, int height,
 	float2* means2D,//TODO: do I have to add const for it? However, internal means2D is not const type. 
 	float* depths,
+	float* mask,
 	int* radii,
 	float4* conic_opacity,
 	float* rgb,
@@ -628,6 +629,7 @@ int CudaRasterizer::Rasterizer::renderForward(
 		means2D,
 		feature_ptr,
 		conic_opacity,
+		mask,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		imgState.n_contrib2loss,
@@ -772,9 +774,11 @@ void CudaRasterizer::Rasterizer::renderBackward(
 	float* dL_dconic,
 	float* dL_dopacity,
 	float* dL_dcolor,//gradient of inputs
+	float* dL_dmask,
 	const float2* means2D,
 	const float4* conic_opacity,
 	const float* rgb,//inputs
+	const float* mask,
 	bool debug,
 	const pybind11::dict &args)
 {
@@ -803,6 +807,7 @@ void CudaRasterizer::Rasterizer::renderBackward(
 		means2D,
 		conic_opacity,
 		color_ptr,
+		mask,
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		compute_locally,
@@ -810,7 +815,8 @@ void CudaRasterizer::Rasterizer::renderBackward(
 		(float3*)dL_dmean2D,
 		(float4*)dL_dconic,
 		dL_dopacity,
-		dL_dcolor), debug)
+		dL_dcolor,
+		dL_dmask), debug)
 	timer.stop("b10 render");
 
 	float backward_render_time = timer.elapsedMilliseconds("b10 render", "sum");

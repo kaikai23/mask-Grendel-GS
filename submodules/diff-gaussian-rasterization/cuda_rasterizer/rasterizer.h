@@ -120,6 +120,7 @@ namespace CudaRasterizer
 			const int width, int height,
 			float2* means2D,//TODO: do I have to add const for it? However, internal means2D is not const type. 
 			float* depths,
+			float* mask,
 			int* radii,
 			float4* conic_opacity,
 			float* rgb,
@@ -144,9 +145,11 @@ namespace CudaRasterizer
 			float* dL_dconic,
 			float* dL_dopacity,
 			float* dL_dcolor,//gradient of inputs
+			float* dL_dmask,
 			const float2* means2D,
 			const float4* conic_opacity,
 			const float* rgb,//inputs
+			const float* mask,
 			bool debug,
 			const pybind11::dict &args);
 

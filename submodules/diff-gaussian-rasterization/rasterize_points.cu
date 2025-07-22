@@ -280,6 +280,7 @@ RenderGaussiansCUDA(
     const int image_width,// image setting
 	torch::Tensor& means2D,// (P, 2)
 	torch::Tensor& depths,
+	torch::Tensor& mask,
 	torch::Tensor& radii,
 	torch::Tensor& conic_opacity,
 	torch::Tensor& rgb,//3dgs intermediate results
@@ -324,6 +325,7 @@ RenderGaussiansCUDA(
 		W, H,//image setting
 		reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
 		depths.contiguous().data<float>(),
+		mask.contiguous().data<float>(),
 		radii.contiguous().data<int>(),
 		reinterpret_cast<float4*>(conic_opacity.contiguous().data<float>()),
 		rgb.contiguous().data<float>(),//3dgs intermediate results
@@ -338,7 +340,7 @@ RenderGaussiansCUDA(
   return std::make_tuple(rendered, out_color, n_render, n_consider, n_contrib, geomBuffer, binningBuffer, imgBuffer);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RenderGaussiansBackwardCUDA(
  	const torch::Tensor& background,
 	const int R,
@@ -350,6 +352,7 @@ RenderGaussiansBackwardCUDA(
 	const torch::Tensor& means2D,// (P, 2)
 	const torch::Tensor& conic_opacity,
 	const torch::Tensor& rgb,
+	const torch::Tensor& mask,
 	const bool debug,
 	const pybind11::dict &args)
 {
@@ -361,6 +364,7 @@ RenderGaussiansBackwardCUDA(
   torch::Tensor dL_dcolors = torch::zeros({P, NUM_CHANNELS}, means2D.options());//if we use mixed precision, dtype in options() is different now. If we also do swapping, device could be different. 
   torch::Tensor dL_dconic = torch::zeros({P, 2, 2}, means2D.options());//The requires_grad property for the gradient tensor is typically False
   torch::Tensor dL_dopacity = torch::zeros({P, 1}, means2D.options());
+  torch::Tensor dL_dmask = torch::zeros({P, 1}, means2D.options());
 
   if(P != 0)
   {
@@ -377,9 +381,11 @@ RenderGaussiansBackwardCUDA(
 		dL_dconic.contiguous().data<float>(),
 		dL_dopacity.contiguous().data<float>(),
 		dL_dcolors.contiguous().data<float>(),//gradient of inputs
+		dL_dmask.contiguous().data<float>(),
 		reinterpret_cast<float2*>(means2D.contiguous().data<float>()),
 		reinterpret_cast<float4*>(conic_opacity.contiguous().data<float>()),
 		rgb.contiguous().data<float>(),
+		mask.contiguous().data<float>(),
 		debug,
 		args);
   }
@@ -396,7 +402,7 @@ RenderGaussiansBackwardCUDA(
   
   //TODO: in pytorch, when the reference to a tensor decreases to 0, the memory will be freed.
   //But what will happen to libtorch?
-  return std::make_tuple(dL_dmeans2D, dL_dconic_opacity, dL_dcolors);
+  return std::make_tuple(dL_dmeans2D, dL_dconic_opacity, dL_dcolors, dL_dmask);
 }
 
 /////////////////////////////// Utility tools ///////////////////////////////
