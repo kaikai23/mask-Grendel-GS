@@ -2630,8 +2630,7 @@ def batched_loss_computation(
             )
             mask_loss = (torch.mean(mask))**2
             loss = (1.0 - args.lambda_dssim) * Ll1 + args.lambda_dssim * (
-                1.0 - ssim_loss + lambda_mask * mask_loss
-            )
+                1.0 - ssim_loss) + lambda_mask * mask_loss
             # print(f"ssim_loss: {1-ssim_loss}")
 
             batched_losses.append([Ll1, ssim_loss])

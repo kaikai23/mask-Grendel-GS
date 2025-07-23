@@ -116,6 +116,7 @@ class OptimizationParams(ParamGroup):
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
+        self.mask_lr = 0.01
         self.lr_scale_loss = 1.0
         self.lr_scale_pos_and_scale = 1.0
         self.rotation_lr = 0.001
