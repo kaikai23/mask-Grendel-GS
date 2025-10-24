@@ -195,6 +195,34 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
             lambda_mask,
         )
 
+        # # Compute Global Mask Loss
+        # local_masks = [m for m in batched_mask if m.numel() > 0]
+        # if len(local_masks) == 0:
+        #     local_cat = torch.tensor([], device='cuda')
+        #     local_sum = torch.tensor(0.0, device='cuda')
+        #     local_count = torch.tensor(0.0, device='cuda')
+        # else:
+        #     local_cat = torch.cat(local_masks, dim=0)
+        #     local_sum = local_cat.sum()
+        #     local_count = torch.tensor(float(local_cat.numel()), device=local_cat.device)
+        # # ---- global stats (detached, no grad path) ----
+        # sum_detached = local_sum.detach().clone()
+        # count_detached = local_count.detach().clone()
+        # gpu_count = torch.tensor(1.0, device='cuda')
+        # torch.distributed.all_reduce(sum_detached, op=torch.distributed.ReduceOp.SUM)
+        # torch.distributed.all_reduce(count_detached, op=torch.distributed.ReduceOp.SUM)
+        # torch.distributed.all_reduce(gpu_count, op=torch.distributed.ReduceOp.SUM)
+        # assert gpu_count.item() == utils.WORLD_SIZE
+        # mu_global = (sum_detached / count_detached).to(local_sum.device)
+        # N_global = count_detached
+        # # ---- grad ----
+        # if local_cat.numel() == 0:
+        #     loss_mask = torch.tensor(0.0, device='cuda')
+        # else:
+        #     # Theoretically, this gets the same gradient with torch.mean(global_mask)**2
+        #     loss_mask = (2 * mu_global / N_global) * local_sum
+        # loss_sum = loss_sum + lambda_mask * loss_mask
+
         timers.start("backward")
         loss_sum.backward()
         timers.stop("backward")

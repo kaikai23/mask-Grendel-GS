@@ -2635,7 +2635,9 @@ def batched_loss_computation(
 
             batched_losses.append([Ll1, ssim_loss])
         loss_sum += loss
-
+    # gpu_masks = torch.cat(batched_mask, dim=0)
+    # if gpu_masks.shape[0] > 0:
+    #     loss_sum += lambda_mask * (torch.mean(gpu_masks))**2
     assert loss_sum.dim() == 0, "The loss_sum must be a scalar tensor."
     timers.stop("loss_computation")
     return loss_sum * args.lr_scale_loss, batched_losses
