@@ -21,6 +21,7 @@ import json
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser
+import tqdm
 
 
 def readImages(renders_dir, gt_dir):
@@ -66,18 +67,23 @@ def evaluate(model_paths, mode):
                 method_dir = test_dir / method
                 gt_dir = method_dir / "gt"
                 renders_dir = method_dir / "renders"
-                renders, gts, image_names = readImages(renders_dir, gt_dir)
-
-                print("Number of renders images:", len(renders))
-                print("Number of gt images:", len(gts))
+                # renders, gts, image_names = readImages(renders_dir, gt_dir)
+                print("Reading images from", renders_dir)
+                image_names = []
                 ssims = []
                 psnrs = []
                 lpipss = []
+                for fname in tqdm.tqdm(os.listdir(renders_dir)):
+                    render = Image.open(renders_dir / fname)
+                    gt = Image.open(gt_dir / fname)
+                    render = tf.to_tensor(render).unsqueeze(0)[:, :3, :, :].cuda()
+                    gt = tf.to_tensor(gt).unsqueeze(0)[:, :3, :, :].cuda()
+                    image_names.append(fname)
+                    ssims.append(ssim(render, gt))
+                    psnrs.append(psnr(render, gt))
+                    lpipss.append(lpips(render, gt, net_type="vgg"))
 
-                for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
-                    ssims.append(ssim(renders[idx], gts[idx]))
-                    psnrs.append(psnr(renders[idx], gts[idx]))
-                    lpipss.append(lpips(renders[idx], gts[idx], net_type="vgg"))
+                print("Number of renders images:", len(image_names))
 
                 print("  SSIM : {:>12.7f}".format(torch.tensor(ssims).mean(), ".5"))
                 print("  PSNR : {:>12.7f}".format(torch.tensor(psnrs).mean(), ".5"))
