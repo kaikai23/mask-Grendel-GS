@@ -65,6 +65,7 @@ class GaussianModel:
         self.optimizer = None
         self.percent_dense = 0
         self.spatial_lr_scale = 0
+        self.gpu_per_ply = False
         self.setup_functions()
 
     def capture(self):
@@ -568,6 +569,53 @@ class GaussianModel:
             )
         )
         self.prune_points(prune_mask)
+    
+    def distributed_load_gpu_per_ply(self, folder):
+        world_size = -1
+        for f in os.listdir(folder):
+            if "_ws" in f:
+                world_size = int(f.split("_ws")[1].split(".")[0])
+                break
+        assert world_size > 0, "world_size should be greater than 1."
+        assert world_size == utils.WORLD_SIZE, "world_size in ply files should be equal to current world_size."
+        rk = utils.GLOBAL_RANK
+        one_checkpoint_path = (folder + "/point_cloud_rk" + str(rk) + "_ws" + str(world_size) + ".ply")
+        print(f"rank {rk} loads {one_checkpoint_path}\n")
+        xyz, features_dc, features_extra, opacities, scales, rots = self.load_raw_gpu_per_ply(one_checkpoint_path)
+        self._xyz = nn.Parameter(
+            torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(
+                True
+            )
+        )
+        self._features_dc = nn.Parameter(
+            torch.tensor(features_dc, dtype=torch.float, device="cuda")
+            .transpose(1, 2)
+            .contiguous()
+            .requires_grad_(True)
+        )
+        self._features_rest = nn.Parameter(
+            torch.tensor(features_extra, dtype=torch.float, device="cuda")
+            .transpose(1, 2)
+            .contiguous()
+            .requires_grad_(True)
+        )
+        self._opacity = nn.Parameter(
+            torch.tensor(
+                opacities, dtype=torch.float, device="cuda"
+            ).requires_grad_(True)
+        )
+        self._scaling = nn.Parameter(
+            torch.tensor(
+                scales, dtype=torch.float, device="cuda"
+            ).requires_grad_(True)
+        )
+        self._rotation = nn.Parameter(
+            torch.tensor(
+                rots, dtype=torch.float, device="cuda"
+            ).requires_grad_(True)
+        )
+
+        self.active_sh_degree = self.max_sh_degree
 
     def distributed_load_ply(self, folder):
         # count the number of files like "point_cloud_rk0_ws4.ply"
@@ -638,6 +686,73 @@ class GaussianModel:
         )
 
         self.active_sh_degree = self.max_sh_degree
+    
+    def load_raw_gpu_per_ply(self, path):
+        # Note that each gpu (process) will only call this function only ONCE to load ONE ply file.
+        print("Loading ", path)
+        plydata = PlyData.read(path)
+
+        xyz = np.stack(
+            (
+                np.asarray(plydata.elements[0]["x"]),
+                np.asarray(plydata.elements[0]["y"]),
+                np.asarray(plydata.elements[0]["z"]),
+            ),
+            axis=1,
+        )
+        opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis]
+
+        features_dc = np.zeros((xyz.shape[0], 3, 1))
+        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+
+        extra_f_names = [
+            p.name
+            for p in plydata.elements[0].properties
+            if p.name.startswith("f_rest_")
+        ]
+        extra_f_names = sorted(extra_f_names, key=lambda x: int(x.split("_")[-1]))
+        assert len(extra_f_names) == 3 * (self.max_sh_degree + 1) ** 2 - 3
+        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        features_extra = features_extra.reshape(
+            (features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1)
+        )
+
+        scale_names = [
+            p.name
+            for p in plydata.elements[0].properties
+            if p.name.startswith("scale_")
+        ]
+        scale_names = sorted(scale_names, key=lambda x: int(x.split("_")[-1]))
+        scales = np.zeros((xyz.shape[0], len(scale_names)))
+        for idx, attr_name in enumerate(scale_names):
+            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        rot_names = [
+            p.name for p in plydata.elements[0].properties if p.name.startswith("rot")
+        ]
+        rot_names = sorted(rot_names, key=lambda x: int(x.split("_")[-1]))
+        rots = np.zeros((xyz.shape[0], len(rot_names)))
+        for idx, attr_name in enumerate(rot_names):
+            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        args = utils.get_args()
+
+        if args.drop_initial_3dgs_p > 0.0:
+            # drop each point with probability args.drop_initial_3dgs_p
+            drop_mask = np.random.rand(xyz.shape[0]) > args.drop_initial_3dgs_p
+            xyz = xyz[drop_mask]
+            features_dc = features_dc[drop_mask]
+            features_extra = features_extra[drop_mask]
+            scales = scales[drop_mask]
+            rots = rots[drop_mask]
+            opacities = opacities[drop_mask]
+
+        return xyz, features_dc, features_extra, opacities, scales, rots
 
     def load_raw_ply(self, path):
         print("Loading ", path)
@@ -766,7 +881,10 @@ class GaussianModel:
         if os.path.exists(os.path.join(path, "point_cloud.ply")):
             self.one_file_load_ply(path)
         else:
-            self.distributed_load_ply(path)
+            if not self.gpu_per_ply:
+                self.distributed_load_ply(path)
+            else:
+                self.distributed_load_gpu_per_ply(path)
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}

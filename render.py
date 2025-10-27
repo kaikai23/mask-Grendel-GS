@@ -153,6 +153,7 @@ def render_sets(
     with torch.no_grad():
         args = utils.get_args()
         gaussians = GaussianModel(dataset.sh_degree)
+        gaussians.gpu_per_ply = True
         scene = Scene(args, gaussians, load_iteration=iteration, shuffle=False)
 
         bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
