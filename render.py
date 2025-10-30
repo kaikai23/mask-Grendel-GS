@@ -153,7 +153,8 @@ def render_sets(
     with torch.no_grad():
         args = utils.get_args()
         gaussians = GaussianModel(dataset.sh_degree)
-        gaussians.gpu_per_ply = True
+        if args.gpu_per_ply:
+            gaussians.gpu_per_ply = True
         scene = Scene(args, gaussians, load_iteration=iteration, shuffle=False)
 
         bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
@@ -200,6 +201,7 @@ if __name__ == "__main__":
     parser.add_argument("--distributed_load", action="store_true")  # TODO: delete this.
     parser.add_argument("--l", default=-1, type=int)
     parser.add_argument("--r", default=-1, type=int)
+    parser.add_argument("--gpu_per_ply", action="store_true")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
     init_distributed(args)

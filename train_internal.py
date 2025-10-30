@@ -190,6 +190,7 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
             batched_strategies,
             batch_statistic_collector,
         )
+        loss_sum += args.lambda_mask * torch.mean((torch.sigmoid(gaussians._mask)))
 
         timers.start("backward")
         loss_sum.backward()
@@ -257,6 +258,12 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
                 )
             else:
                 densification(iteration, scene, gaussians, batched_screenspace_pkg)
+                
+            # Mask Prune
+            if iteration >= args.densify_until_iter and utils.check_update_at_this_iter(
+                iteration, args.bsz, args.mask_prune_iter, 0
+            ):
+                gaussians.mask_prune()
 
             # Save Gaussians
             if any(

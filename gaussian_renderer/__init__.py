@@ -904,6 +904,12 @@ def distributed_preprocess3dgs_and_all2all_final(
     scales = pc.get_scaling
     rotations = pc.get_rotation
     shs = pc.get_features
+
+    if pc._mask.shape[0] != 0:
+        mask = ((torch.sigmoid(pc._mask) > 0.01).float()- torch.sigmoid(pc._mask)).detach() + torch.sigmoid(pc._mask)
+        scales = scales * mask
+        opacity = opacity * mask
+
     if timers is not None:
         timers.stop("forward_prepare_gaussians")
     utils.check_initial_gpu_memory_usage("after forward_prepare_gaussians")

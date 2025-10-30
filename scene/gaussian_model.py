@@ -57,6 +57,7 @@ class GaussianModel:
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+        self._mask = torch.empty(0)
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(
             0
@@ -175,6 +176,7 @@ class GaussianModel:
                 (fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"
             )
         )
+        masks = torch.ones((fused_point_cloud.shape[0], 1), device="cuda")
 
         # The above computation/memory is replicated on all ranks. Because initialization is small, it's ok.
         # Split the point cloud across the ranks.
@@ -193,6 +195,7 @@ class GaussianModel:
             scales = scales[point_ind_l:point_ind_r].contiguous()
             rots = rots[point_ind_l:point_ind_r].contiguous()
             opacities = opacities[point_ind_l:point_ind_r].contiguous()
+            masks = masks[point_ind_l:point_ind_r].contiguous()
             log_file.write(
                 "rank: {}, Number of initialized points: {}\n".format(
                     utils.GLOBAL_RANK, fused_point_cloud.shape[0]
@@ -210,6 +213,7 @@ class GaussianModel:
             scales = scales[drop_mask]
             rots = rots[drop_mask]
             opacities = opacities[drop_mask]
+            masks = masks[drop_mask]
             log_file.write(
                 "rank: {}, Number of initialized points after random drop: {}\n".format(
                     utils.GLOBAL_RANK, fused_point_cloud.shape[0]
@@ -227,6 +231,7 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
+        self._mask = nn.Parameter(masks.requires_grad_(False))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self.sum_visible_count_in_one_batch = torch.zeros(
             (self.get_xyz.shape[0]), device="cuda"
@@ -277,6 +282,11 @@ class GaussianModel:
                 "params": [self._opacity],
                 "lr": training_args.opacity_lr,
                 "name": "opacity",
+            },
+            {
+                "params": [self._mask],
+                "lr": training_args.mask_lr,
+                "name": "mask",
             },
             {
                 "params": [self._scaling],
@@ -577,7 +587,7 @@ class GaussianModel:
                 world_size = int(f.split("_ws")[1].split(".")[0])
                 break
         assert world_size > 0, "world_size should be greater than 1."
-        assert world_size == utils.WORLD_SIZE, "world_size in ply files should be equal to current world_size."
+        assert world_size == utils.WORLD_SIZE == dist.get_world_size(), "world_size in ply files should be equal to current world_size."
         rk = utils.GLOBAL_RANK
         one_checkpoint_path = (folder + "/point_cloud_rk" + str(rk) + "_ws" + str(world_size) + ".ply")
         print(f"rank {rk} loads {one_checkpoint_path}\n")
@@ -941,6 +951,7 @@ class GaussianModel:
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
+        self._mask = optimizable_tensors["mask"]
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
 
@@ -1005,6 +1016,7 @@ class GaussianModel:
         new_features_dc,
         new_features_rest,
         new_opacities,
+        new_mask,
         new_scaling,
         new_rotation,
         new_send_to_gpui_cnt,
@@ -1016,6 +1028,7 @@ class GaussianModel:
             "opacity": new_opacities,
             "scaling": new_scaling,
             "rotation": new_rotation,
+            "mask": new_mask,
         }
 
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
@@ -1023,6 +1036,7 @@ class GaussianModel:
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
+        self._mask = optimizable_tensors["mask"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
 
@@ -1068,6 +1082,7 @@ class GaussianModel:
         new_features_dc = self._features_dc[selected_pts_mask].repeat(N, 1, 1)
         new_features_rest = self._features_rest[selected_pts_mask].repeat(N, 1, 1)
         new_opacity = self._opacity[selected_pts_mask].repeat(N, 1)
+        new_mask = self._mask[selected_pts_mask].repeat(N, 1)
         new_send_to_gpui_cnt = self.send_to_gpui_cnt[selected_pts_mask].repeat(N, 1)
 
         self.densification_postfix(
@@ -1075,6 +1090,7 @@ class GaussianModel:
             new_features_dc,
             new_features_rest,
             new_opacity,
+            new_mask,
             new_scaling,
             new_rotation,
             new_send_to_gpui_cnt,
@@ -1106,6 +1122,7 @@ class GaussianModel:
         new_features_dc = self._features_dc[selected_pts_mask]
         new_features_rest = self._features_rest[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
+        new_mask = self._mask[selected_pts_mask]
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
         new_send_to_gpui_cnt = self.send_to_gpui_cnt[selected_pts_mask]
@@ -1115,6 +1132,7 @@ class GaussianModel:
             new_features_dc,
             new_features_rest,
             new_opacities,
+            new_mask,
             new_scaling,
             new_rotation,
             new_send_to_gpui_cnt,
@@ -1159,6 +1177,11 @@ class GaussianModel:
             )
         self.prune_points(prune_mask)
 
+        torch.cuda.empty_cache()
+    
+    def mask_prune(self):
+        prune_mask = (torch.sigmoid(self._mask) <= 0.01).squeeze()
+        self.prune_points(prune_mask)
         torch.cuda.empty_cache()
 
     def add_densification_stats(
@@ -1425,6 +1448,7 @@ class GaussianModel:
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
         self._opacity = optimizable_tensors["opacity"]
+        self._mask = optimizable_tensors["mask"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
 
