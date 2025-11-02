@@ -194,6 +194,7 @@ def training(dataset_args, opt_args, pipe_args, args, log_file):
             batched_mask,
             lambda_mask,
         )
+        loss_sum += args.lambda_mask * (torch.mean(gaussians.get_mask))**2
 
         # # Compute Global Mask Loss
         # local_masks = [m for m in batched_mask if m.numel() > 0]
