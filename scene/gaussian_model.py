@@ -231,7 +231,7 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
-        self._mask = nn.Parameter(masks.requires_grad_(False))
+        self._mask = nn.Parameter(masks.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
         self.sum_visible_count_in_one_batch = torch.zeros(
             (self.get_xyz.shape[0]), device="cuda"
