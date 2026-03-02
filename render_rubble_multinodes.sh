@@ -13,7 +13,7 @@ source /home/bingxing2/ailab/liuyifei/.bashrc
 conda activate mask_grendel
 
 srun torchrun --standalone --nnodes=1 --nproc-per-node=4 \
-    render.py --bsz 1 -m output/rubble_pixsfm_g16_bz8_m0.0005_200k_50k_lrinit0.000016_0.00004_0.0010 \
+    render.py --bsz 1 -m output/rubble_pixsfm_g16_bz8_storedm0.0005_200k_50k_lrinit0.000016_0.0001_0.002 \
     --skip_train
 
 echo "finished rubble"

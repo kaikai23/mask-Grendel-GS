@@ -4,9 +4,9 @@
 #SBATCH -p vip_gpu_ailab_low
 #SBATCH -A ailab
 #SBATCH --qos=gpugpu
-#SBATCH -t 24:00:00
-#SBATCH -o myjob.01.out
-#SBATCH -e myjob.01.err
+#SBATCH -t 14:00:00
+#SBATCH -o myjob.02.out
+#SBATCH -e myjob.02.err
 
 export NCCL_ALGO=Ring
 export NCCL_MAX_NCHANNELS=16
@@ -37,20 +37,20 @@ srun torchrun --nnodes=4 --nproc-per-node=4 --rdzv_backend=c10d --rdzv_endpoint=
     --test_iterations 20000 40000 60000 80000 100000 120000 140000 160000 180000 200000\
     --save_iterations 200000 \
     --preload_dataset_to_gpu_threshold 0 \
-    -m output/reprod_rubble_pixsfm_g16_bz8_m0.0005_200k_50k_lrinit0.000016_0.00008_0.0016 \
+    -m output/rubble_pixsfm_g16_bz8_storedm0.0005_200k_50k_lrinit0.000016_0.00006_0.0012 \
     --lambda_mask 0.0005 \
     --mask_from_iter 0 \
     --mask_until_iter 200000 \
     --iterations 200000 \
     --densify_until_iter 50000 \
     --position_lr_init 0.000016 \
-    --densify_grad_threshold 0.00008 \
-    --percent_dense 0.0016
+    --densify_grad_threshold 0.00006 \
+    --percent_dense 0.0012
 
 echo "finished rubble"
 
 srun torchrun --standalone --nnodes=1 --nproc-per-node=4 \
-    render.py --bsz 1 -m output/reprod_rubble_pixsfm_g16_bz8_m0.0005_200k_50k_lrinit0.000016_0.00008_0.0016 \
+    render.py --bsz 1 -m output/rubble_pixsfm_g16_bz8_storedm0.0005_200k_50k_lrinit0.000016_0.00006_0.0012 \
     --skip_train
 
 echo "finished rubble rendering"
