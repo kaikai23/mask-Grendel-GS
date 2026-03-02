@@ -4,7 +4,7 @@
 #SBATCH -p vip_gpu_ailab_low
 #SBATCH -A ailab
 #SBATCH --qos=gpugpu
-#SBATCH -t 10:00:00
+#SBATCH -t 24:00:00
 #SBATCH -o myjob.03.out
 #SBATCH -e myjob.03.err
 
@@ -35,17 +35,17 @@ srun torchrun --nnodes=8 --nproc-per-node=4 --rdzv_backend=c10d --rdzv_endpoint=
     --save_iterations 200000 \
     --preload_dataset_to_gpu_threshold 0 \
     --redistribute_gaussians_frequency 2 \
-    -m output/rubble_pixsfm_g32_bz8_200k_50k_lrinit0.000016_0.00003_0.0008 \
+    -m output/rubble_pixsfm_g32_bz8_200k_50k_lrinit0.000016_0.00002_0.0006 \
     --iterations 200000 \
     --densify_until_iter 50000 \
     --position_lr_init 0.000016 \
-    --densify_grad_threshold 0.00003 \
-    --percent_dense 0.0008
+    --densify_grad_threshold 0.00002 \
+    --percent_dense 0.0006
 
 echo "finished training"
 
-srun torchrun --standalone --nnodes=1 --nproc-per-node=4 \
-    render.py --bsz 1 -m output/rubble_pixsfm_g32_bz8_200k_50k_lrinit0.000016_0.00003_0.0008 \
+srun torchrun --nnodes=8 --nproc-per-node=4 --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT\
+    render.py --bsz 1 -m output/rubble_pixsfm_g32_bz8_200k_50k_lrinit0.000016_0.00002_0.0006 \
     --skip_train
 
 echo "finished rendering"

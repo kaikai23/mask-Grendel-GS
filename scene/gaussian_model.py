@@ -577,7 +577,7 @@ class GaussianModel:
                 world_size = int(f.split("_ws")[1].split(".")[0])
                 break
         assert world_size > 0, "world_size should be greater than 1."
-        assert world_size == utils.WORLD_SIZE, "world_size in ply files should be equal to current world_size."
+        assert world_size == utils.WORLD_SIZE == dist.get_world_size(), "world_size in ply files should be equal to current world_size."
         rk = utils.GLOBAL_RANK
         one_checkpoint_path = (folder + "/point_cloud_rk" + str(rk) + "_ws" + str(world_size) + ".ply")
         print(f"rank {rk} loads {one_checkpoint_path}\n")

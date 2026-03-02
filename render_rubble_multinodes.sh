@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -N 2
+#SBATCH -N 8
 #SBATCH --gres=gpu:4
 #SBATCH -p vip_gpu_ailab_low
 #SBATCH -A ailab
@@ -31,7 +31,7 @@ MASTER_PORT=29500
 echo $MASTER_ADDR
 echo $MASTER_PORT
 
-srun torchrun --nnodes=2 --nproc-per-node=4 --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
+srun torchrun --nnodes=8 --nproc-per-node=4 --rdzv_backend=c10d --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT \
     render.py --bsz 1 -m output/rubble_pixsfm_g32_bz8_200k_50k_lrinit0.000016_0.00003_0.0008 \
     --skip_train
 

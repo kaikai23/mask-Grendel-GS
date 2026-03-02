@@ -76,6 +76,13 @@ def densification(iteration, scene, gaussians, batched_screenspace_pkg):
             timers.stop("reset_opacity")
 
         timers.stop("densification")
+    elif args.disable_auto_densification and iteration <= args.densify_until_iter:
+        if iteration > args.densify_from_iter and utils.check_update_at_this_iter(
+            iteration, args.bsz, args.densification_interval, 0
+        ):
+            utils.check_memory_usage(
+                log_file, args, iteration, gaussians, before_densification_stop=True
+            )
     else:
         if iteration > args.densify_from_iter and utils.check_update_at_this_iter(
             iteration, args.bsz, args.densification_interval, 0
